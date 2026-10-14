@@ -363,14 +363,7 @@ async function tryRunCluster(
       process.exit(1);
     }
 
-    // Allow specifying 16 vCPU as either "16" or "16384". The actual value is
-    // validated later.
-    const MAX_VCPUS = 16;
-    if (n <= MAX_VCPUS) {
-      options.launchConfig.cpu = n * 1024;
-    } else {
-      options.launchConfig.cpu = n;
-    }
+    options.launchConfig.cpu = normalizeEcsCpu(n);
   }
 
   if (options.memory) {
@@ -380,12 +373,7 @@ async function tryRunCluster(
       process.exit(1);
     }
 
-    const MAX_MEMORY_IN_GB = 120;
-    if (n <= MAX_MEMORY_IN_GB) {
-      options.launchConfig.memory = String(parseInt(options.memory, 10) * 1024);
-    } else {
-      options.launchConfig.memory = options.memory;
-    }
+    options.launchConfig.memory = normalizeEcsMemory(options.memory);
   }
 
   // check launch type is valid:
@@ -907,7 +895,16 @@ async function cleanupResources(context: RunClusterContext) {
   }
 }
 
-function checkFargateResourceConfig(cpu: number, memory: number) {
+// CLI flags accept vCPU/GiB shorthand or ECS CPU units/MiB.
+export function normalizeEcsCpu(cpu: number): number {
+  return cpu <= 32 ? cpu * 1024 : cpu;
+}
+
+export function normalizeEcsMemory(memory: string): string {
+  return Number(memory) <= 244 ? String(parseInt(memory, 10) * 1024) : memory;
+}
+
+export function checkFargateResourceConfig(cpu: number, memory: number) {
   function generateListOfOptionsMiB(
     minGB: number,
     maxGB: number,
@@ -921,7 +918,7 @@ function checkFargateResourceConfig(cpu: number, memory: number) {
     return result;
   }
 
-  // Based on https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-cpu-memory-error.html
+  // Based on https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-tasks-services.html#fargate-tasks-size
   const FARGATE_VALID_CONFIGS: Record<number, number[]> = {
     256: [512, 1024, 2048],
     512: [1024, 2048, 3072, 4096],
@@ -929,7 +926,8 @@ function checkFargateResourceConfig(cpu: number, memory: number) {
     2048: generateListOfOptionsMiB(4, 16, 1),
     4096: generateListOfOptionsMiB(8, 30, 1),
     8192: generateListOfOptionsMiB(16, 60, 4),
-    16384: generateListOfOptionsMiB(32, 120, 8)
+    16384: generateListOfOptionsMiB(32, 120, 8),
+    32768: [60 * 1024, 120 * 1024, 244 * 1024]
   };
 
   if (!FARGATE_VALID_CONFIGS[cpu]) {
